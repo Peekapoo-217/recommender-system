@@ -1,3 +1,9 @@
+import streamlit as st
+import pandas as pd
+import numpy as np
+import pickle
+import os
+from sklearn.metrics.pairwise import cosine_similarity
 # ==========================================
 # GIAO DIỆN CHÍNH (Chia 2 Tab)
 # ==========================================
