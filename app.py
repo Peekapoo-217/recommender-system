@@ -1,160 +1,147 @@
-import streamlit as st
-import pandas as pd
-import numpy as np
-import pickle
-import os
-from sklearn.metrics.pairwise import cosine_similarity
-
-st.set_page_config(page_title="Hệ Thống Gợi Ý Phụ Kiện", layout="centered", page_icon="📱")
-
 # ==========================================
-# 1. HÀM TẢI DỮ LIỆU (Đã thêm Product Metadata)
+# GIAO DIỆN CHÍNH (Chia 2 Tab)
 # ==========================================
-@st.cache_data
-def load_models():
-    BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-    # Đường dẫn tới các file pkl
-    svd_path = os.path.join(BASE_DIR, 'saved_model', 'svd_model.pkl')
-    user_path = os.path.join(BASE_DIR, 'saved_model', 'user_profiles.pkl')
-    item_path = os.path.join(BASE_DIR, 'saved_model', 'item_profiles.pkl')
-    meta_path = os.path.join(BASE_DIR, 'saved_model', 'product_info.pkl')
+st.title("📱 Smart Recommendation System")
 
-    with open(svd_path, 'rb') as f:
-        svd_data = pickle.load(f)
-    with open(meta_path, 'rb') as f:
-        product_info = pickle.load(f)
+# Tạo 2 Tab cho 2 đối tượng khách hàng
+tab1, tab2 = st.tabs(["👤 Khách hàng thân thiết (Đăng nhập)", "✨ Khách hàng mới (Trải nghiệm AI)"])
 
-    user_profiles = pd.read_pickle(user_path)
-    item_profiles = pd.read_pickle(item_path)
-    
-    return svd_data, user_profiles, item_profiles, product_info
-
-try:
-    svd_data, user_profiles, item_profiles, product_info = load_models()
-    user_enc = svd_data['user_enc']
-    item_enc = svd_data['item_enc']
-    user_factors = svd_data['user_factors']
-    item_factors = svd_data['item_factors']
-    item_matrix = item_profiles.values
-    all_items = item_profiles.index.tolist()
-except Exception as e:
-    st.error(f"Lỗi tải mô hình hoặc dữ liệu: {e}")
-    st.stop()
-
-# Từ điển dịch khía cạnh
-aspect_dict_vn = {
-    'Screen': 'Màn hình & Hiển thị', 'Design': 'Thiết kế & Kiểu dáng',
-    'Protection': 'Độ bền & Khả năng bảo vệ', 'Price_Quality': 'Giá cả & Chất lượng',
-    'Power_Charging': 'Pin & Tốc độ sạc', 'Audio': 'Âm thanh'
-}
-
-# ==========================================
-# 2. THUẬT TOÁN GỢI Ý (Hybrid)
-# ==========================================
-def get_hybrid_recommendations(user_id, alpha=0.2, top_n=5):
-    u_idx = user_enc[user_id]
-    user_vector = user_factors[u_idx].reshape(1, -1)
-    
-    # 1. Điểm từ SVD (Collaborative Filtering)
-    svd_scores = np.dot(user_vector, item_factors.T).flatten()
-    if svd_scores.max() != svd_scores.min():
-        svd_scores_norm = (svd_scores - svd_scores.min()) / (svd_scores.max() - svd_scores.min())
+# ----------------------------------------------------
+# TAB 1: DÀNH CHO KHÁCH HÀNG CŨ (Hệ thống lai Hybrid)
+# ----------------------------------------------------
+with tab1:
+    if not st.session_state['logged_in']:
+        st.write("Vui lòng đăng nhập để AI phân tích lịch sử mua sắm của bạn.")
+        with st.form("login_form"):
+            username = st.text_input("Tên đăng nhập (Thử: admin, khachhang1)")
+            password = st.text_input("Mật khẩu (Thử: 123)", type="password")
+            submitted = st.form_submit_button("Đăng Nhập")
+            if submitted:
+                if username in USER_DB and USER_DB[username]["password"] == password:
+                    st.session_state['logged_in'] = True
+                    st.session_state['current_user'] = USER_DB[username]
+                    st.rerun()
+                else:
+                    st.error("❌ Tên đăng nhập hoặc mật khẩu không đúng!")
     else:
-        svd_scores_norm = np.zeros_like(svd_scores)
+        current_user = st.session_state['current_user']
+        real_id = current_user['real_id']
         
-    # 2. Điểm từ Aspect (Content-based)
-    u_aspect_vector = user_profiles.loc[user_id].values.reshape(1, -1)
-    aspect_sim = cosine_similarity(u_aspect_vector, item_matrix).flatten()
-    aspect_sim_norm = (aspect_sim + 1) / 2
-    
-    # 3. Phối hợp Hybrid (Sử dụng Alpha tối ưu 0.2)
-    hybrid_score = alpha * svd_scores_norm + (1 - alpha) * aspect_sim_norm
-    
-    rec_df = pd.DataFrame({'ASIN': all_items, 'hybrid_score': hybrid_score})
-    return rec_df.sort_values(by='hybrid_score', ascending=False).head(top_n)
-
-# ==========================================
-# 3. HỆ THỐNG ĐĂNG NHẬP
-# ==========================================
-sample_users = user_profiles.index[:3].tolist()
-USER_DB = {
-    "admin": {"password": "123", "real_id": sample_users[0], "name": "Quản trị viên"},
-    "khachhang1": {"password": "123", "real_id": sample_users[1], "name": "Nguyễn Văn A"},
-    "khachhang2": {"password": "123", "real_id": sample_users[2], "name": "Trần Thị B"}
-}
-
-if 'logged_in' not in st.session_state:
-    st.session_state['logged_in'] = False
-    st.session_state['current_user'] = None
-
-if not st.session_state['logged_in']:
-    st.title("🔒 Đăng Nhập Hệ Thống")
-    with st.form("login_form"):
-        username = st.text_input("Tên đăng nhập")
-        password = st.text_input("Mật khẩu", type="password")
-        submitted = st.form_submit_button("Đăng Nhập")
-        if submitted:
-            if username in USER_DB and USER_DB[username]["password"] == password:
-                st.session_state['logged_in'] = True
-                st.session_state['current_user'] = USER_DB[username]
+        col_greet, col_logout = st.columns([3, 1])
+        with col_greet:
+            st.success(f"👋 Chào mừng trở lại, **{current_user['name']}**!")
+        with col_logout:
+            if st.button("Đăng xuất", key="logout_btn"):
+                st.session_state['logged_in'] = False
                 st.rerun()
-            else:
-                st.error("❌ Tên đăng nhập hoặc mật khẩu không đúng!")
-else:
-    # --- GIAO DIỆN CHÍNH ---
-    current_user = st.session_state['current_user']
-    real_id = current_user['real_id']
-    
-    st.title("📱 Smart Recommendation")
-    
-    col1, col2 = st.columns([3, 1])
-    with col1:
-        st.success(f"Chào mừng, **{current_user['name']}**!")
-    with col2:
-        if st.button("Đăng xuất"):
-            st.session_state['logged_in'] = False
-            st.rerun()
-            
-    st.divider()
-    
-    # Phân tích profile người dùng
-    user_aspect_profile = user_profiles.loc[real_id]
-    top_user_aspect = user_aspect_profile.idxmax()
-    top_user_aspect_vn = aspect_dict_vn.get(top_user_aspect, top_user_aspect)
-    
-    st.info(f"🧠 **AI Insight:** Bạn có xu hướng quan tâm nhiều đến khía cạnh **{top_user_aspect_vn}**.")
-    
-    st.markdown("### 🎯 Sản phẩm đề xuất cho bạn")
-    
-    # Gọi gợi ý với Alpha = 0.2 (kết quả thực nghiệm tốt nhất)
-    recs = get_hybrid_recommendations(real_id, alpha=0.2, top_n=5)
-    
-    for rank, row in enumerate(recs.itertuples(), 1):
-        asin = row.ASIN
-        score = row.hybrid_score
-        
-        # Lấy thông tin từ metadata thật
-        item_meta = product_info.get(asin, {})
-        title = item_meta.get('title', f"Sản phẩm {asin}")
-        img_url = item_meta.get('imUrl') # Hoặc 'image' tùy file meta của bạn
-        
-        # Phân tích thế mạnh sản phẩm
-        item_aspect_profile = item_profiles.loc[asin]
-        top_item_aspect = item_aspect_profile.idxmax()
-        top_item_aspect_vn = aspect_dict_vn.get(top_item_aspect, top_item_aspect)
-        
-        with st.container(border=True):
-            c1, c2 = st.columns([1, 4])
-            with c1:
-                if img_url:
-                    st.image(img_url)
-                else:
-                    st.write("📦")
-            with c2:
-                st.markdown(f"**Top {rank}: {title}**")
-                st.caption(f"Mã: `{asin}` | Độ phù hợp: **{score * 100:.1f}%**")
                 
-                if top_user_aspect == top_item_aspect:
-                    st.write(f"✅ Khớp hoàn toàn với sở thích của bạn về **{top_item_aspect_vn}**.")
-                else:
-                    st.write(f"🌟 Nổi bật về **{top_item_aspect_vn}**, rất đáng để trải nghiệm.")
+        user_aspect_profile = user_profiles.loc[real_id]
+        top_user_aspect = user_aspect_profile.idxmax()
+        top_user_aspect_vn = aspect_dict_vn.get(top_user_aspect, top_user_aspect)
+        
+        st.info(f"🧠 **Lịch sử AI phân tích:** Bạn có xu hướng khắt khe và quan tâm nhiều nhất đến **{top_user_aspect_vn}**.")
+        st.markdown("### 🎯 Gợi ý hôm nay cho bạn")
+        
+        recs = get_hybrid_recommendations(real_id, alpha=0.2, top_n=15) # Lấy dư ra 15 cái để lọc
+        
+        # LOGIC LỌC SẢN PHẨM VÔ DANH
+        valid_recs = []
+        for row in recs.itertuples():
+            if row.ASIN in product_info: # CHỈ lấy sản phẩm có trong Metadata
+                valid_recs.append(row)
+            if len(valid_recs) == 5:     # Đủ 5 cái thì dừng
+                break
+                
+        for rank, row in enumerate(valid_recs, 1):
+            asin = row.ASIN
+            score = row.hybrid_score
+            item_meta = product_info[asin]
+            title = item_meta.get('title', "Sản phẩm")
+            img_url = item_meta.get('imUrl')
+            
+            top_item_aspect = item_profiles.loc[asin].idxmax()
+            top_item_aspect_vn = aspect_dict_vn.get(top_item_aspect, top_item_aspect)
+            
+            with st.container(border=True):
+                c1, c2 = st.columns([1, 4])
+                with c1:
+                    if img_url: st.image(img_url)
+                    else: st.write("📦")
+                with c2:
+                    st.markdown(f"**Top {rank}: {title}**")
+                    st.caption(f"Độ tự tin: **{score * 100:.1f}%**")
+                    if top_user_aspect == top_item_aspect:
+                        st.write(f"✅ **Lý do đề xuất:** Cực kỳ xuất sắc về **{top_item_aspect_vn}**, khớp 100% với gu mua sắm của bạn.")
+                    else:
+                        st.write(f"🌟 **Lý do đề xuất:** Nổi bật về **{top_item_aspect_vn}**, đang lọt top thịnh hành cùng nhóm khách hàng giống bạn.")
+
+# ----------------------------------------------------
+# TAB 2: DÀNH CHO KHÁCH HÀNG MỚI (Giải quyết Cold-Start)
+# ----------------------------------------------------
+with tab2:
+    st.markdown("### 🛠️ Thiết lập Sở thích Cá nhân (Cold-Start Problem)")
+    st.write("Vì bạn là người dùng mới, hãy cho AI biết bạn quan tâm đến điều gì nhất khi mua phụ kiện điện thoại nhé!")
+    
+    # Cho người dùng chọn các tiêu chí
+    selected_aspects = st.multiselect(
+        "Chọn 1 hoặc nhiều tiêu chí quan trọng nhất với bạn:",
+        options=list(aspect_dict_vn.keys()),
+        format_func=lambda x: aspect_dict_vn[x]
+    )
+    
+    if st.button("🔍 Tìm sản phẩm phù hợp", type="primary"):
+        if not selected_aspects:
+            st.warning("Vui lòng chọn ít nhất 1 tiêu chí!")
+        else:
+            # 1. Chế tạo Vector Sở thích tức thời
+            # Mặc định tất cả bằng 0, cái nào user chọn thì cho điểm tuyệt đối 1.0
+            custom_vector = np.zeros((1, 6))
+            for aspect in selected_aspects:
+                idx = list(aspect_dict_vn.keys()).index(aspect)
+                custom_vector[0, idx] = 1.0 
+                
+            # 2. So khớp Vector này với toàn bộ kho sản phẩm (Content-Based thuần túy)
+            sim_scores = cosine_similarity(custom_vector, item_matrix).flatten()
+            sim_scores_norm = (sim_scores + 1) / 2 # Chuẩn hóa về [0, 1]
+            
+            # 3. Lấy Top sản phẩm có thông tin
+            new_user_df = pd.DataFrame({'ASIN': all_items, 'score': sim_scores_norm})
+            new_user_recs = new_user_df.sort_values(by='score', ascending=False)
+            
+            valid_new_recs = []
+            for row in new_user_recs.itertuples():
+                if row.ASIN in product_info:
+                    valid_new_recs.append(row)
+                if len(valid_new_recs) == 5:
+                    break
+                    
+            # 4. Hiển thị kết quả
+            st.divider()
+            st.success("🎉 Đã tìm thấy các sản phẩm phù hợp nhất với cấu hình của bạn!")
+            
+            for rank, row in enumerate(valid_new_recs, 1):
+                asin = row.ASIN
+                item_meta = product_info[asin]
+                title = item_meta.get('title', "Sản phẩm")
+                img_url = item_meta.get('imUrl')
+                
+                # Tìm xem sản phẩm này mạnh nhất môn nào trong các môn mà user vừa chọn
+                item_scores = item_profiles.loc[asin]
+                best_match_aspect = None
+                best_match_score = -99
+                for asp in selected_aspects:
+                    if item_scores[asp] > best_match_score:
+                        best_match_score = item_scores[asp]
+                        best_match_aspect = asp
+                
+                match_aspect_vn = aspect_dict_vn[best_match_aspect]
+                
+                with st.container(border=True):
+                    c1, c2 = st.columns([1, 4])
+                    with c1:
+                        if img_url: st.image(img_url)
+                        else: st.write("📦")
+                    with c2:
+                        st.markdown(f"**Top {rank}: {title}**")
+                        st.caption(f"Mức độ tương thích cấu hình: **{row.score * 100:.1f}%**")
+                        st.write(f"🎯 **Tại sao AI chọn?:** Sản phẩm này được cộng đồng mạng đánh giá cực cao về **{match_aspect_vn}** - chính là tiêu chí bạn đang ưu tiên!")
