@@ -84,49 +84,24 @@ def get_content_recommendations(custom_vector):
 # Hàm hiển thị giao diện UI cho sản phẩm
 def render_product_cards(recs_dataframe, is_hybrid=True, user_gu=None):
     valid_count = 0
-    # Link ảnh dự phòng siêu an toàn (Không bị lỗi Client Error)
-    FALLBACK_IMAGE = "https://placehold.co/150x150/eeeeee/999999?text=No+Image"
-    
     for row in recs_dataframe.itertuples():
         if valid_count >= 5: break
-        
-        # Nếu ASIN có trong bộ từ điển Metadata
         if row.ASIN in product_info:
             info = product_info[row.ASIN]
             item_strength = item_profiles.loc[row.ASIN].idxmax()
             
             with st.container(border=True):
-                c1, c2 = st.columns([1, 4]) # Cột 1 để ảnh, Cột 2 để chữ
-                
-                # --- XỬ LÝ HÌNH ẢNH TRÁNH LỖI BẢO MẬT & LINK CHẾT ---
-                img_url = info.get('imUrl', '')
-                
-                with c1:
-                    if img_url:
-                        # Ép HTTP thành HTTPS để Streamlit Cloud không bị chặn ảnh
-                        img_url = img_url.replace("http://", "https://")
-                        try:
-                            # Thử load ảnh thật của Amazon
-                            st.image(img_url, use_container_width=True)
-                        except:
-                            # Nếu link ảnh Amazon 2014 đã chết -> Load ảnh dự phòng
-                            st.image(FALLBACK_IMAGE, use_container_width=True)
-                    else:
-                        # Nếu sản phẩm không có link ảnh -> Load ảnh dự phòng
-                        st.image(FALLBACK_IMAGE, use_container_width=True)
-                
-                # --- XỬ LÝ TEXT VÀ LỜI GIẢI THÍCH ---
+                c1, c2 = st.columns([1, 4])
+                c1.image(info['imUrl']) if info.get('imUrl') else c1.write("📦")
                 with c2:
-                    st.markdown(f"**{info.get('title', 'Sản phẩm không xác định')}**")
+                    st.markdown(f"**{info.get('title', 'Sản phẩm')}**")
                     st.caption(f"Mức độ phù hợp: **{row.score*100:.1f}%**")
                     
                     if is_hybrid:
-                        reason = f"Khớp hoàn toàn với gu của bạn về **{aspect_dict_vn.get(item_strength, item_strength)}**." if item_strength == user_gu else f"Sản phẩm nổi bật về **{aspect_dict_vn.get(item_strength, item_strength)}** đang được nhiều người ưa chuộng."
+                        reason = f"Khớp hoàn toàn với gu của bạn về **{aspect_dict_vn[item_strength]}**." if item_strength == user_gu else f"Sản phẩm nổi bật về **{aspect_dict_vn[item_strength]}** đang được nhiều người ưa chuộng."
                     else:
-                        reason = f"Được đánh giá cao về **{aspect_dict_vn.get(item_strength, item_strength)}** - Khớp với tiêu chí bạn vừa thiết lập."
-                    
+                        reason = f"Được đánh giá cao về **{aspect_dict_vn[item_strength]}** - Khớp với tiêu chí bạn vừa thiết lập."
                     st.write(f"💡 **Lý do:** {reason}")
-                    
             valid_count += 1
 
 # ==========================================
